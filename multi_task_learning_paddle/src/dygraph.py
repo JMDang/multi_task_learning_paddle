@@ -35,8 +35,7 @@ def train(model,
           model_save_path=None,
           best_model_save_path=None,
           print_step=15,
-          acti_fun="softmax",
-          threshold=None
+          use_crf=True
         ):
     """动态图训练
     """
@@ -44,11 +43,7 @@ def train(model,
     train_start_time = time.time()
 
     model.train()
-    if acti_fun == "softmax":
-        criterion = paddle.nn.loss.CrossEntropyLoss()
-    else:
-        # criterion = paddle.nn.loss.BCELoss()#要求输入logits是sigmoid之后的
-        criterion = paddle.nn.loss.BCEWithLogitsLoss()#要求输入logits是未经过sigmoid的
+    criterion = paddle.nn.loss.CrossEntropyLoss()
     # 统一学习率
     # optimizer = paddle.optimizer.Adam(learning_rate=learning_rate,
     #                                   parameters=model.parameters())
@@ -65,26 +60,20 @@ def train(model,
                                                      max_seq_len,
                                                      max_ensure,
                                                      with_label=True)
-        for cur_train_data, cur_train_length, cur_train_label_mc, cur_train_label_ml in train_data_batch:
+        for cur_train_data, cur_train_length, cur_train_label, cur_train_entity in train_data_batch:
             cur_train_step += 1
             # 训练数据转为tensor
             cur_train_data = paddle.to_tensor(cur_train_data)
-            cur_train_label_mc = paddle.to_tensor(cur_train_label_mc)
-            cur_train_label_ml = paddle.to_tensor(cur_train_label_ml)
+            cur_train_length = paddle.to_tensor(cur_train_length)
+            cur_train_label = paddle.to_tensor(cur_train_label)
             # 生成loss
-            logits = model(cur_train_data)
-            # softmax多分类,softmax二分类
-            if acti_fun == "softmax":
-                loss = criterion(logits, cur_train_label_mc)
-            # sigmoid二分类
-            elif label_encoder.size() == 2:
-                cur_train_label_mc = paddle.cast(cur_train_label_mc, "float32")
-                logits = paddle.squeeze(logits, 1)
-                loss = criterion(logits, cur_train_label_mc)
-            # sigmoid多标签
+
+            if use_crf:
+                logits, logits_decode = model(cur_train_data, cur_train_length)
+                loss = paddle.mean(model.crf_loss(logits, cur_train_length, cur_train_label))
             else:
-                cur_train_label_ml = paddle.cast(cur_train_label_ml, "float32")
-                loss = criterion(logits, cur_train_label_ml)
+                logits = model(cur_train_data)
+                loss = criterion(logits, cur_train_label)
 
             if cur_train_step % print_step == 0:
                 speed = cur_train_step / (time.time() - train_start_time)
@@ -109,8 +98,7 @@ def train(model,
                                          batch_size=batch_size,
                                          max_seq_len=max_seq_len,
                                          max_ensure=max_ensure,
-                                         acti_fun=acti_fun,
-                                         threshold=threshold)
+                                         use_crf=use_crf)
             logging.info('eval epoch %d, pre %.5f rec %.5f f1 %.5f' % (cur_epoch, precision, recall, f1))
 
             if best_model_save_path and f1 > best_f1:
@@ -123,19 +111,6 @@ def train(model,
 
     logging.info("train model cost time %.4fs" % (time.time() - train_start_time))
 
-def translate(in_list):
-    """
-    in_list:二纬list
-    """
-    result = []
-    for one_case in in_list:
-        one_case_label = []
-        for i, item in enumerate(one_case):
-            if item == 1:
-                one_case_label.append(i)
-        result.append(one_case_label)
-    return result
-
 def predict(model,
             predict_data,
             label_encoder,
@@ -143,8 +118,7 @@ def predict(model,
             max_seq_len=300,
             max_ensure=True,
             with_label=False,
-            acti_fun="softmax",
-            threshold=0.5):
+            use_crf=True):
     """ 动态图预测
     [IN]  model:
           predict_data: list[(input1[, input2, ...])], 待预测数据
@@ -156,10 +130,9 @@ def predict(model,
     """
 
     pre_label = []
-    pre_label_name = []
+    pre_entity = []
     rea_label = []
-    rea_label_name = []
-
+    rea_entity = []
     if with_label:
         predict_data_batch = DataLoader.gen_batch_data(
             predict_data,
@@ -168,40 +141,29 @@ def predict(model,
             max_ensure=max_ensure,
             with_label=True)
         model.eval()
-        for cur_predict_data, cur_predict_length, cur_rea_label_mc, cur_rea_label_ml in predict_data_batch:
+        for cur_predict_data, cur_predict_length, cur_rea_label, cur_rea_entity in predict_data_batch:
             cur_predict_data = paddle.to_tensor(cur_predict_data)
-            cur_logits = model(cur_predict_data)
-            assert acti_fun in ["softmax", "sigmoid"], f"param acti_fun must in [softmax, sigmoid],yours is {acti_fun}"
-            # softmax多分类,softmax二分类
-            if acti_fun == "softmax":
-                cur_pre_label = paddle.nn.functional.softmax(cur_logits).numpy()
-                cur_pre_label = np.argmax(cur_pre_label, axis=-1)
-                cur_pre_label_name = [label_encoder.inverse_transform(label_id) for label_id in cur_pre_label]
-                cur_rea_label = cur_rea_label_mc
+            cur_predict_length = paddle.to_tensor(cur_predict_length)
 
-            # sigmoid二分类
-            elif label_encoder.size() == 2:
-                cur_pre_label = paddle.nn.functional.sigmoid(cur_logits)
-                cur_pre_label = paddle.squeeze(cur_pre_label, 1).numpy()
-                assert threshold >= 0.0 and threshold <=1.0, f"{threshold} must between [0, 1]"
-                cur_pre_label = np.where(cur_pre_label > threshold, 1, 0)
-                cur_pre_label_name = [label_encoder.inverse_transform(label_id) for label_id in cur_pre_label]
-                cur_rea_label = cur_rea_label_mc
-            # sigmoid多标签
+            if use_crf:
+                logits, logits_decode = model(cur_predict_data, cur_predict_length)
+                cur_pre_label = logits_decode.numpy()
+                pre_label.extend(cur_pre_label)
+                pre_entity.extend(helper.extract_entity_crf(pre_label=cur_pre_label,
+                                                           predict_length=cur_predict_length.numpy(),
+                                                           label_encoder=label_encoder))
             else:
-                cur_pre_label = paddle.nn.functional.sigmoid(cur_logits)
-                assert threshold >= 0.0 and threshold <= 1.0, f"{threshold} must between [0, 1]"
-                cur_pre_label = np.where(cur_pre_label > threshold, 1, 0)
-                cur_pre_label_name = [",".join(map(lambda x: label_encoder.inverse_transform(x), one_case_real_label))
-                                   for one_case_real_label in translate(cur_pre_label)]
-                cur_rea_label = cur_rea_label_ml
-            pre_label.extend(cur_pre_label)
+                cur_logits = model(cur_predict_data)
+                cur_logits = paddle.nn.functional.softmax(cur_logits).numpy()
+                cur_pre_label = np.argmax(cur_logits, axis=-1)
+                pre_label.extend(cur_pre_label)
+                pre_entity.extend(helper.extract_entity_dp(pre_label=cur_pre_label,
+                                                 predict_length=cur_predict_length.numpy(),
+                                                 label_encoder=label_encoder))
             rea_label.extend(cur_rea_label)
-            pre_label_name.extend(cur_pre_label_name)
-            rea_label_name.extend([",".join(map(lambda x:label_encoder.inverse_transform(x), one_case_real_label))
-                                   for one_case_real_label in translate(cur_rea_label_ml)])
+            rea_entity.extend(cur_rea_entity)
         model.train()
-        return pre_label, pre_label_name, rea_label, rea_label_name
+        return pre_label, pre_entity, rea_label, rea_entity
 
     else:
         predict_data_batch = DataLoader.gen_batch_data(
@@ -214,31 +176,24 @@ def predict(model,
         for cur_predict_data, cur_predict_length in predict_data_batch:
             cur_predict_data = paddle.to_tensor(cur_predict_data)
             cur_predict_length = paddle.to_tensor(cur_predict_length)
-            cur_logits = model(cur_predict_data)
-            # softmax多分类,softmax二分类
-            if acti_fun == "softmax":
-                cur_pre_label = paddle.nn.functional.softmax(cur_logits).numpy()
-                cur_pre_label = np.argmax(cur_pre_label, axis=-1)
-                cur_pre_label_name = [label_encoder.inverse_transform(label_id) for label_id in cur_pre_label]
-            # sigmoid二分类
-            elif label_encoder.size() == 2:
-                cur_pre_label = paddle.nn.functional.sigmoid(cur_logits)
-                cur_pre_label = paddle.squeeze(cur_pre_label, 1).numpy()
-                assert threshold >= 0.0 and threshold <= 1.0, f"{threshold} must between [0, 1]"
-                cur_pre_label = np.where(cur_pre_label > threshold, 1, 0)
-                cur_pre_label_name = [label_encoder.inverse_transform(label_id) for label_id in cur_pre_label]
-            # sigmoid多标签
+            if use_crf:
+                logits, logits_decode = model(cur_predict_data, cur_predict_length)
+                cur_pre_label = logits_decode.numpy()
+                pre_label.extend(cur_pre_label)
+                pre_entity.extend(helper.extract_entity_crf(pre_label=cur_pre_label,
+                                                            predict_length=cur_predict_length.numpy(),
+                                                            label_encoder=label_encoder))
             else:
-                cur_pre_label = paddle.nn.functional.sigmoid(cur_logits)
-                assert threshold >= 0.0 and threshold <= 1.0, f"{threshold} must between [0, 1]"
-                cur_pre_label = np.where(cur_pre_label > threshold, 1, 0)
-                cur_pre_label_name =  [",".join(map(lambda x: label_encoder.inverse_transform(x), one_case_real_label))
-                 for one_case_real_label in translate(cur_pre_label)]
-
-            pre_label.extend(cur_pre_label)
-            pre_label_name.extend(cur_pre_label_name)
+                cur_logits = model(cur_predict_data)
+                cur_logits = paddle.nn.functional.softmax(cur_logits).numpy()
+                cur_pre_label = np.argmax(cur_logits, axis=-1)
+                pre_label.extend(cur_pre_label)
+                pre_entity.extend(helper.extract_entity_dp(pre_label=cur_pre_label,
+                                                           predict_length=cur_predict_length.numpy(),
+                                                           label_encoder=label_encoder))
         model.train()
-        return pre_label, pre_label_name
+        return pre_label, pre_entity
+
 
 def eval(model,
          eval_data,
@@ -246,8 +201,7 @@ def eval(model,
          batch_size=32,
          max_seq_len=300,
          max_ensure=True,
-         acti_fun="softmax",
-         threshold=0.5):
+         use_crf=True):
     """ eval
     [IN]  model:
           eval_data: list[(input1[, input2, ...], label)], 训练数据
@@ -263,11 +217,19 @@ def eval(model,
                                                            max_seq_len=max_seq_len,
                                                            max_ensure=max_ensure,
                                                            with_label=True,
-                                                           acti_fun=acti_fun,
-                                                           threshold=threshold)
-    rea_label = np.array(rea_label).flatten()
-    pre_label = np.array(pre_label).flatten()
-    precision, recall, f1 = helper.multi_classify_prf_macro(rea_label, pre_label)
+                                                           use_crf=use_crf)
+    
+    TP = 0.0
+    pre_all = 0.000001
+    rea_all = 0.000001
+    for it1, it2 in zip(pre_entity, rea_entity):
+        pre_all = pre_all + len(set([tuple(x) for x in it1]))
+        rea_all = rea_all + len(set([tuple(x) for x in it2]))
+        TP = TP + len(set([tuple(x) for x in it1]) & set([tuple(x) for x in it2]))
+
+    precision = TP / pre_all
+    recall = TP / rea_all
+    f1 = 2 * precision * recall / (precision + recall + 0.000001)
 
     return precision, recall, f1
 

@@ -19,9 +19,9 @@ from paddlenlp.transformers import AutoTokenizer,ErnieForTokenClassification
 import dygraph
 from data_loader import DataLoader
 from label_encoder import LabelEncoder
-from models.ernie_classify import ErnieForSequenceClassification
-from models.ernie_classify_v2 import ErnieForSequenceClassificationV2
-from paddlenlp.transformers import ErnieModel
+from models.ernie_2fc import Ernie2FcForTokenClassification
+from models.ernie_crf_v1 import ErnieCrfForTokenClassification
+from models.ernie_crf_v2 import ErnieCrfV2ForTokenClassification
 
 
 class Predict:
@@ -43,16 +43,20 @@ class Predict:
         """
         if self.predict_conf["RUN"].getboolean("finetune_ernie"):
             label_encoder = self.label_encoder
-            # 仅且仅当二分类且使用sigmoid时num_classes为1
-            num_classes = 1 if self.predict_conf["ERNIE"]["acti_fun"] == "sigmoid" \
-                               and label_encoder.size() == 2 else label_encoder.size()
+            predict_conf = self.predict_conf["ERNIE"]
 
-            if self.predict_conf["ERNIE"]["version"] == "v1":
-                model_predict = ErnieForSequenceClassification.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"],
-                                                                       num_classes=num_classes)
+            if self.predict_conf["ERNIE"].getboolean("use_crf"):
+                if self.predict_conf["ERNIE"]["crf_type"] == "v1":
+                    model_predict = ErnieCrfForTokenClassification.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"],
+                                                                           num_classes=label_encoder.size() * 2 - 1)
+                else:
+                    ernie = ErnieForTokenClassification.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"],
+                                                                        num_classes=label_encoder.size() * 2 - 1)
+                    model_predict = ErnieCrfV2ForTokenClassification(ernie)
+
             else:
-                ernie = ErnieModel.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"])
-                model_predict = ErnieForSequenceClassificationV2(ernie, num_classes=num_classes)
+                model_predict = Ernie2FcForTokenClassification.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"],
+                                                                       num_classes=label_encoder.size())
 
             dygraph.load_model(model_predict, self.predict_conf["MODEL_FILE"]["model_best_path"])
 
@@ -74,17 +78,16 @@ class Predict:
 
                 if mark == 32:
                     predict_data = list(zip(text_list, length_list))
-                    pre_label, pre_label_name = dygraph.predict(model=model_predict,
+                    pre_label, pre_entity = dygraph.predict(model=model_predict,
                                                             predict_data=predict_data,
                                                             label_encoder=label_encoder,
-                                                            batch_size=self.predict_conf["ERNIE"].getint("batch_size"),
-                                                            max_seq_len=self.predict_conf["ERNIE"].getint("max_seq_len"),
+                                                            batch_size=predict_conf.getint("batch_size"),
+                                                            max_seq_len=predict_conf.getint("max_seq_len"),
                                                             max_ensure=True,
                                                             with_label=False,
-                                                            acti_fun=self.predict_conf["ERNIE"]["acti_fun"],
-                                                            threshold=self.predict_conf["ERNIE"].getfloat("threshold"))
-                    for origin_text, one_pre_label_name in zip(origin_texts, pre_label_name):
-                        print(origin_text,"\t", "\t".join(tmp_d[origin_text][1:]), "\t", one_pre_label_name)
+                                                            use_crf=self.predict_conf["ERNIE"].getboolean("use_crf"))
+                    for origin_text, entity in zip(origin_texts, pre_entity):
+                        print(origin_text,"\t", "\t".join(tmp_d[origin_text][1:]), "\t", json.dumps(entity, ensure_ascii=False))
                     predict_data = []
                     text_list = []
                     length_list = []
@@ -92,18 +95,16 @@ class Predict:
                     mark = 0
             if mark != 0:
                 predict_data = list(zip(text_list, length_list))
-                pre_label, pre_label_name = dygraph.predict(model=model_predict,
+                pre_label, pre_entity = dygraph.predict(model=model_predict,
                                                         predict_data=predict_data,
                                                         label_encoder=label_encoder,
-                                                        batch_size=self.predict_conf["ERNIE"].getint("batch_size"),
-                                                        max_seq_len=self.predict_conf["ERNIE"].getint("max_seq_len"),
+                                                        batch_size=predict_conf.getint("batch_size"),
+                                                        max_seq_len=predict_conf.getint("max_seq_len"),
                                                         max_ensure=True,
                                                         with_label=False,
-                                                        acti_fun=self.predict_conf["ERNIE"]["acti_fun"],
-                                                        threshold=self.predict_conf["ERNIE"].getfloat("threshold"))
-
-                for origin_text, one_pre_label_name in zip(origin_texts, pre_label_name):
-                    print(origin_text, "\t", "\t".join(tmp_d[origin_text][1:]), "\t", one_pre_label_name)
+                                                        use_crf=self.predict_conf["ERNIE"].getboolean("use_crf"))
+                for origin_text, entity in zip(origin_texts, pre_entity):
+                    print(origin_text, "\t", "\t".join(tmp_d[origin_text][1:]), "\t", json.dumps(entity, ensure_ascii=False))
 
 if __name__ == "__main__":
     Predict(predict_conf_path=sys.argv[1]).run()
