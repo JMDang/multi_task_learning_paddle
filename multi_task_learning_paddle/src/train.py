@@ -13,14 +13,12 @@ import logging
 import configparser
 import numpy as np
 import paddle
-from paddlenlp.transformers import AutoTokenizer,ErnieForTokenClassification
+from paddlenlp.transformers import AutoTokenizer,ErnieModel
 
 import dygraph
 from data_loader import DataLoader
 from label_encoder import LabelEncoder
-from models.ernie_2fc import Ernie2FcForTokenClassification
-from models.ernie_crf_v1 import ErnieCrfForTokenClassification
-from models.ernie_crf_v2 import ErnieCrfV2ForTokenClassification
+from models.ernie_mtl import ErnieMTLModel
 
 logging.basicConfig(
     format='"%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s',
@@ -37,9 +35,13 @@ class Train:
         Train.check_dir(self.train_conf["DEFAULT"]["output_dir"])
         Train.check_dir(self.train_conf["DEFAULT"]["model_dir"])
 
-        self.label_encoder = LabelEncoder(label_id_info=self.train_conf["DATA"]["label_encoder_path"], 
-                                    isFile=True)
-        for label_id, label_name in sorted(self.label_encoder.id_label_dict.items(), key=lambda x:x[0]):
+        self.label_encoder_cls = LabelEncoder(label_id_info=self.train_conf["DATA"]["label_encoder_cls"],
+                                              isFile=True)
+        self.label_encoder_ner = LabelEncoder(label_id_info=self.train_conf["DATA"]["label_encoder_ner"],
+                                              isFile=True)
+        for label_id, label_name in sorted(self.label_encoder_cls.id_label_dict.items(), key=lambda x: x[0]):
+            logging.info("%d: %s" % (label_id, label_name))
+        for label_id, label_name in sorted(self.label_encoder_ner.id_label_dict.items(), key=lambda x: x[0]):
             logging.info("%d: %s" % (label_id, label_name))
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.train_conf["ERNIE"]["pretrain_model"])
@@ -47,20 +49,23 @@ class Train:
     def run(self):
         """执行入口
         """
-        self.data_set = DataLoader(tokenizer=self.tokenizer, label_encoder=self.label_encoder)
+        self.data_set = DataLoader(tokenizer=self.tokenizer,
+                                   label_encoder_ner=self.label_encoder_ner,
+                                   label_encoder_cls=self.label_encoder_cls
+                                   )
         self.data_set.gen_data(
             train_data_dir=self.train_conf["DATA"]["train_data_path"],
             dev_data_dir=self.train_conf["DATA"]["dev_data_path"] if \
                 self.train_conf["DATA"]["dev_data_path"] != "None" else None,
             test_data_dir=self.train_conf["DATA"]["test_data_path"] if \
-                self.train_conf["DATA"]["test_data_path"] != "None" else None,
-            use_crf=self.train_conf["ERNIE"].getboolean("use_crf")
+                self.train_conf["DATA"]["test_data_path"] != "None" else None
         )
 
         if self.train_conf["RUN"].getboolean("finetune_ernie"):
             Train.finetune_ernie(self.train_conf,
                                  self.data_set,
-                                 self.label_encoder)
+                                 self.label_encoder_ner,
+                                 self.label_encoder_cls)
 
         if self.train_conf["RUN"].getboolean("ernie_to_static"):
             self.ernie_to_static(train_conf=self.train_conf,
@@ -85,28 +90,21 @@ class Train:
     @staticmethod
     def finetune_ernie(train_conf,
                        data_set,
-                       label_encoder
+                       label_encoder_ner,
+                       label_encoder_cls
                        ):
         """ernie微调
         """
-        if train_conf["ERNIE"].getboolean("use_crf"):
-            if train_conf["ERNIE"]["crf_type"] == "v1":
-                model = ErnieCrfForTokenClassification.from_pretrained(train_conf["ERNIE"]["pretrain_model"],
-                                                                   num_classes=label_encoder.size() *2 -1)
-            else:
-                ernie = ErnieForTokenClassification.from_pretrained(train_conf["ERNIE"]["pretrain_model"],
-                                                                   num_classes=label_encoder.size() *2 -1)
-                model = ErnieCrfV2ForTokenClassification(ernie)
-
-        else:
-            model = Ernie2FcForTokenClassification.from_pretrained(train_conf["ERNIE"]["pretrain_model"],
-                                                                    num_classes=label_encoder.size())
-        
+        pre_trainernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
+        model = ErnieMTLMode(pre_trainernie,
+                                     ner_num_classes=label_encoder_ner.size() * 2 - 1,
+                                     cls_num_classes=label_encoder_cls.size())
         dygraph.load_model(model, train_conf["MODEL_FILE"]["model_best_path"])
 
         dygraph.train(model,
                       train_data=data_set.train_data,
-                      label_encoder=label_encoder,
+                      label_encoder_ner=label_encoder_ner,
+                      label_encoder_cls=label_encoder_cls,
                       dev_data= data_set.dev_data,
                       epochs=train_conf["ERNIE"].getint("epoch"),
                       pretrain_lr=train_conf["ERNIE"].getfloat("learning_rate"),
@@ -116,39 +114,25 @@ class Train:
                       max_seq_len=train_conf["ERNIE"].getint("max_seq_len"),
                       model_save_path=train_conf["MODEL_FILE"]["model_path"],
                       best_model_save_path=train_conf["MODEL_FILE"]["model_best_path"],
-                      print_step=train_conf["ERNIE"].getint("print_step"),
-                      use_crf=train_conf["ERNIE"].getboolean("use_crf"))
+                      print_step=train_conf["ERNIE"].getint("print_step"))
     
     @staticmethod
     def ernie_to_static(train_conf,
                         label_encoder):
         """ernie模型转静态图模型文件
         """
-        if train_conf["ERNIE"].getboolean("use_crf"):
-            if train_conf["ERNIE"]["crf_type"] == "v1":
-                model = ErnieCrfForTokenClassification.from_pretrained(train_conf["ERNIE"]["pretrain_model"],
-                                                                       num_classes=label_encoder.size() * 2 - 1)
-            else:
-                ernie = ErnieForTokenClassification.from_pretrained(train_conf["ERNIE"]["pretrain_model"],
-                                                                    num_classes=label_encoder.size() * 2 - 1)
-                model = ErnieCrfV2ForTokenClassification(ernie)
-
-        else:
-            model = Ernie2FcForTokenClassification.from_pretrained(train_conf["ERNIE"]["pretrain_model"],
-                                                                   num_classes=label_encoder.size())
+        pre_trainernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
+        model = ErnieMTLMode(pre_trainernie,
+                             ner_num_classes=label_encoder_ner.size() * 2 - 1,
+                             cls_num_classes=label_encoder_cls.size())
         dygraph.load_model(model, train_conf["MODEL_FILE"]["model_best_path"])
 
         model.eval()
-        if train_conf["ERNIE"].getboolean("use_crf"):
-            model = paddle.jit.to_static(model,
-                                    input_spec=[paddle.static.InputSpec(shape=[None, train_conf["ERNIE"].getint("max_seq_len")],dtype="int32"),
-                                                paddle.static.InputSpec(shape=[None,],dtype="int32"),
-                                                None, None])
-        else:
-            model = paddle.jit.to_static(model,
-                                         input_spec=[paddle.static.InputSpec(
-                                          shape=[None, train_conf["ERNIE"].getint("max_seq_len")], dtype="int32"),
-                                                 None, None, None])
+        model = paddle.jit.to_static(model,
+                                input_spec=[paddle.static.InputSpec(shape=[None, train_conf["ERNIE"].getint("max_seq_len")],dtype="int32"),
+                                            paddle.static.InputSpec(shape=[None,],dtype="int32"),
+                                            None, None])
+
         paddle.jit.save(model, train_conf["MODEL_FILE"]["model_static_path"])
         logging.info("save static ernie to {}".format(train_conf["MODEL_FILE"]["model_static_path"]))
 

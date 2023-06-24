@@ -21,68 +21,68 @@ logging.basicConfig(
 class DataLoader:
     """数据集类
     """
-    def __init__(self, tokenizer, label_encoder):
+    def __init__(self, tokenizer, label_encoder_ner, label_encoder_cls):
         self.tokenizer = tokenizer
-        self.label_encoder = label_encoder
+        self.label_encoder_ner = label_encoder_ner
+        self.label_encoder_cls = label_encoder_cls
     
     def gen_data(self,
             train_data_dir=None,
             dev_data_dir=None,
-            test_data_dir=None,
-            use_crf=True):
+            test_data_dir=None):
         """加载训练集、验证集、测试集并进行序列化
         """
         if train_data_dir:
             self.train_text_list, self.train_text_ids_list, self.train_text_ids_length, \
-                self.train_entity_list, self.train_label_list = \
-                DataLoader.read_file(train_data_dir, self.tokenizer, self.label_encoder, use_crf)
+                self.train_entity_list, self.train_label_list_ner, self.train_label_list_cls = \
+                DataLoader.read_file(train_data_dir, self.tokenizer, self.label_encoder_ner, self.label_encoder_cls)
             logging.info(f"train data num = {len(self.train_text_ids_list)}")
             self.train_data = list(zip(self.train_text_ids_list, self.train_text_ids_length, \
-                                        self.train_label_list, self.train_entity_list))
+                                        self.train_label_list_ner, self.train_label_list_cls, self.train_entity_list))
         else:
             self.train_data = None
 
         if dev_data_dir:
             self.dev_text_list, self.dev_text_ids_list, self.dev_text_ids_length, \
-                self.dev_entity_list, self.dev_label_list = \
-                DataLoader.read_file(dev_data_dir, self.tokenizer, self.label_encoder, use_crf)
+                self.dev_entity_list,self.dev_label_list_ner, self.dev_label_list_cls = \
+                DataLoader.read_file(dev_data_dir, self.tokenizer, self.label_encoder_ner, self.label_encoder_cls)
             logging.info("dev data num = {}".format(len(self.dev_text_ids_list)))
             self.dev_data = list(zip(self.dev_text_ids_list, self.dev_text_ids_length, \
-                                        self.dev_label_list, self.dev_entity_list))
+                                        self.dev_label_list_ner, self.dev_label_list_cls, self.dev_entity_list))
         else:
             self.dev_data = None
         
         if test_data_dir:
             self.test_text_list, self.test_text_ids_list, self.test_text_ids_length, \
-            self.test_entity_list, self.test_label_list = \
-                DataLoader.read_file(test_data_dir, self.tokenizer, self.label_encoder, use_crf)
+            self.test_entity_list, self.test_label_list_ner, self.test_label_list_cls = \
+                DataLoader.read_file(test_data_dir, self.tokenizer, self.label_encoder_ner, self.label_encoder_cls)
             logging.info("test data num = {}".format(len(self.test_text_ids_list)))
             self.test_data = list(zip(self.test_text_ids_list, self.test_text_ids_length, \
-                                     self.test_label_list, self.test_entity_list))
+                                     self.test_label_list_ner, self.test_label_list_cls, self.test_entity_list))
         else:
             self.test_data = None
 
     @staticmethod
-    def read_file(data_dir, tokenizer, label_encoder, use_crf):
+    def read_file(data_dir, tokenizer, label_encoder_ner, label_encoder_cls):
         """
         [IN] data_dir: 数据目录
              tokenizer: 切分工具
              label_encoder: 标签工具
-             use_crf:使用crf进行实体识别,如果为false，则为双指针方式识别实体
         [OUT] res: list[]
         """
         text_list = []
         entity_list = []
-        label_list = []
+        label_list_ner = []
+        label_list_cls = []
         file_list = DataLoader.get_file_list(data_dir)
         for file_index, file_path in enumerate(file_list):
             with open(file_path, "r", encoding='utf-8') as fr:
                 for line in fr.readlines():
                     #先把有空格的数据去除掉，之前的实体index包含了空格
                     cols = line.strip("\n").split('\t')
-                    if len(cols) != 2:#text \t labels
+                    if len(cols) != 3:#text \t labels \t labels
                         continue
-                    text, label_entity_list = cols
+                    text, label_entity_list, label_cls = cols
                     if text.find(" ") != -1:
                         continue
                     if not label_entity_list:
@@ -94,34 +94,27 @@ class DataLoader:
                     entity_list.append(label_entity_list)
                     text_len = len(text) + 2
                     # crf标签序列
-                    if use_crf:
-                        """
-                        class_name--->classify_id--->BIO_id
-                        OTHER-------->0------------->OTHER:0
-                        class1------->1------------->B_class1:1, I_class1:2
-                        class2------->2------------->B_class2:3, I_class2:4 
-                        class3------->3------------->B_class3:5, I_class3:6
-                        ...
-                        ...
-                        class416----->416----------->B_class416:831, I_class3:832
-                        
-                        """
-                        label = [0] * text_len
-                        for item in label_entity_list:
-                            start, end = item[:2]
-                            if (end - 1) == start:
-                                label[start+1] = label_encoder.transform(item[2]) * 2 - 1
-                            else:
-                                label[start + 1] = label_encoder.transform(item[2]) * 2 - 1
-                                label[end] = label_encoder.transform(item[2]) * 2
-                                label[start + 2: end] = [label_encoder.transform(item[2]) * 2] * (end - start - 2)
-                    # 双指针预测,标签序列
-                    else:
-                        label = [[0] * text_len for _ in range(2)]
-                        for item in label_entity_list:
-                            label[0][item[0]+1] = label_encoder.transform(item[2])
-                            label[1][item[1]] = label_encoder.transform(item[2])
-                    label_list.append(label)
+
+                    """
+                    class_name--->classify_id--->BIO_id
+                    OTHER-------->0------------->OTHER:0
+                    class1------->1------------->B_class1:1, I_class1:2
+                    class2------->2------------->B_class2:3, I_class2:4
+                    ...
+                    ...
+                    class416----->416----------->B_class416:831, I_class3:832
+                    
+                    """
+                    label = [0] * text_len
+                    for item in label_entity_list:
+                        start, end = item[:2]
+                        if (end - 1) == start:
+                            label[start+1] = label_encoder.transform(item[2]) * 2 - 1
+                        else:
+                            label[start + 1] = label_encoder.transform(item[2]) * 2 - 1
+                            label[end] = label_encoder.transform(item[2]) * 2
+                            label[start + 2: end] = [label_encoder.transform(item[2]) * 2] * (end - start - 2)
+
         logging.info("tokenizer encode start")
         start_time = time.time()
         text_ids_list = [tokenizer(x)['input_ids'] for x in text_list]
@@ -133,10 +126,11 @@ class DataLoader:
         for i in range(3):
             logging.info(text_list[i])
             logging.info(json.dumps(text_ids_list[i]))
-            logging.info(json.dumps(label_list[i]))
+            logging.info(json.dumps(label_list_ner[i]))
+            logging.info(json.dumps(label_list_cls[i]))
             logging.info(json.dumps(entity_list[i], ensure_ascii=False))
             logging.info("*"*77)
-        return text_list, text_ids_list, text_ids_length, entity_list, label_list
+        return text_list, text_ids_list, text_ids_length, entity_list, label_list_ner, label_list_cls
 
     @staticmethod
     def get_file_list(data_path):
@@ -167,7 +161,7 @@ class DataLoader:
         return file_list
 
     @staticmethod
-    def batch_padding(data_list, max_seq_len=50, max_ensure=True):
+    def batch_padding(data_list, max_seq_len=50, max_ensure=True, is_ids=True):
         """ batch_padding
         data_list: list:(b,[m,n,s])
         max_seq_len: int, 数据最大长度
@@ -178,8 +172,19 @@ class DataLoader:
         else:
             cur_max_len = max([len(x) for x in data_list])
             cur_max_len = max_seq_len if cur_max_len > max_seq_len else cur_max_len
-        # batch_padding
-        res = [np.pad(x[:cur_max_len], [0, cur_max_len - len(x[:cur_max_len])], mode='constant') for x in data_list]
+
+        def _process_one_sentence(x, cur_max_len):
+            """
+            保证按照最大长度截取，ids的最后一位是ernie的sentence segid
+            """
+            x = x[:cur_max_len]
+            x[-1] = 2
+            return x
+
+        if is_ids:
+            res = [np.pad(_process_one_sentence(x, cur_max_len), [0, cur_max_len - len(x[:cur_max_len])], mode="constant") for x in data_list]
+        else:
+            res = [np.pad(x[:cur_max_len], [0, cur_max_len - len(x[:cur_max_len])], mode='constant') for x in data_list]
         return np.array(res)
 
     @staticmethod
@@ -195,26 +200,18 @@ class DataLoader:
         data_lists = list(zip(*cur_batch_data))
 
         ids_list = data_lists[0]
-        length_list = data_lists[1]
-        ids_array = DataLoader.batch_padding(ids_list, max_seq_len, max_ensure)
+        length_list = [num if num < max_seq_len else max_ensure for num in data_lists[1]]
+        ids_array = DataLoader.batch_padding(ids_list, max_seq_len, max_ensure, is_ids=True)
         batch_list.append(ids_array)
-        batch_list.append(length_list)
+        batch_list.append(np.array(length_list))
 
         if with_label:
-            label_list = data_lists[2]
-            entity_list = data_lists[3]
-            label_shape = np.array(label_list).shape
-            # shape(b,[m,n,s...])一致说明使用的是crf做ner;pad后shape(b,s)
-            if np.shape(ids_list) == label_shape:
-                label_array = DataLoader.batch_padding(label_list, max_seq_len, max_ensure)
-
-            # 否则shape(b,2,[m,n,s...])是双指针ner，对于开始和结束位置都做一次分类;pad后shape(b,2,s)
-            else:
-                label_array = np.array(label_list)
-                label_array = np.reshape(label_array, (label_shape[0] * label_shape[1],))
-                label_array = DataLoader.batch_padding(label_array, max_seq_len, max_ensure)
-                label_array = label_array.reshape((label_shape[0], label_shape[1], -1))
+            label_list_ner = data_lists[2]
+            label_list_cls = data_lists[3]
+            entity_list = data_lists[4]
+            label_array = DataLoader.batch_padding(label_list_ner, max_seq_len, max_ensure, is_ids=False)
             batch_list.append(label_array)
+            batch_list.append(np.array(label_list_cls))
             batch_list.append(entity_list)
         return batch_list
 
@@ -239,10 +236,11 @@ if __name__ == "__main__":
     from label_encoder import LabelEncoder
     tokenizer = AutoTokenizer.from_pretrained('ernie-1.0')
 
-    label_encoder = LabelEncoder("../input/label.txt")
-    dl = DataLoader(tokenizer, label_encoder)
+    label_encoder_ner = LabelEncoder("../input/label_ner.txt")
+    label_encoder_cls = LabelEncoder("../input/label_cls.txt")
+    dl = DataLoader(tokenizer, label_encoder_ner, label_encoder_cls)
 
-    dl.gen_data("../input/train_data/", use_crf=True)
+    dl.gen_data("../input/train_data/")
 
     train_data_batch = DataLoader.gen_batch_data(dl.train_data,
                                                  batch_size=10,
@@ -250,13 +248,6 @@ if __name__ == "__main__":
                                                  max_ensure=True
                                                  )
 
-    for cur_train_data, cur_train_length, cur_train_label, cur_train_entity in train_data_batch:
-        print("djm:", cur_train_data.shape)
-        print("djm:", cur_train_data[0])
-        print("djm:", cur_train_label.shape)
-        print("djm:", cur_train_label[0])
-        print("djm:", cur_train_label[7])
-        print("djm:", cur_train_entity)
-        print("djm:", cur_train_length)
-        print(np.shape(cur_train_entity))
+    for cur_train_data, cur_train_length, cur_train_label_ner, cur_train_label_cls, cur_train_entity in train_data_batch:
+
         break

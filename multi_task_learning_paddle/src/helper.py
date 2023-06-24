@@ -8,8 +8,46 @@ Desc  :   common func
 """
 
 import logging
-
+import numpy as np
 # logging.basicConfig(format='%(asctime)s-%(levelname)s - %(message)s', level=logging.INFO)
+from sklearn.metrics import  precision_score, recall_score, f1_score
+
+def multi_classify_prf_macro(y_true, y_pre):
+    """macro prf
+    每个类别看作二分类,每个TP FN FP TN,算prf后平均
+    """
+    p = precision_score(y_true=y_true, y_pred=y_pre, average="macro")
+    r = recall_score(y_true=y_true, y_pred=y_pre, average="macro")
+    f = f1_score(y_true=y_true, y_pred=y_pre, average="macro")
+    return p,r,f
+
+def multi_classify_prf_micro(y_true, y_pre):
+    """micro, prf
+    每个类别看作二分类,每个TP FN FP TN,先求和后算一次prf
+    """
+    p = precision_score(y_true=y_true, y_pred=y_pre, average="micro")
+    r = recall_score(y_true=y_true, y_pred=y_pre, average="micro")
+    f = f1_score(y_true=y_true, y_pred=y_pre, average="micro")
+    return p,r,f
+
+def multi_classify_prf_self(y_true, y_pred):
+    """
+    除了0类其他类别的PRF
+    """
+    y_true=np.argmax(y_true,1)
+    y_pred = np.argmax(y_pred, 1)
+    y_preNotNA = [int(i) for i in np.greater(y_pred, 0)]
+    pre_num = np.sum(y_preNotNA)
+    y_trueNotNA = [int(i) for i in np.greater(y_true, 0)]
+    true_num = np.sum(y_trueNotNA)
+    equal_num = np.sum(np.multiply([i for i in np.equal(y_true, y_pred)], y_preNotNA))
+    try:
+        precision = equal_num / pre_num
+        recall = equal_num / true_num
+        f1 = (2 * precision * recall) / (precision + recall)
+    except ZeroDivisionError:
+        precision, recall, f1 = 0, 0, 0
+    return precision, recall, f1
 
 def extract_entity_crf(pre_label, predict_length, label_encoder=None):
     """ 从预测标签抽取实体,标签个数: label_encoder.size() * 2 - 1
@@ -80,6 +118,8 @@ def extract_entity_dp(pre_label, predict_length, label_encoder):
                         break
         pre_entity.append(item)
     return pre_entity
+
+
 
 
 
