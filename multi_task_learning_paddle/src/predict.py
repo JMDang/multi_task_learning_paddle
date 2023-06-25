@@ -32,9 +32,11 @@ class Predict:
                                               isFile=True)
         self.label_encoder_ner = LabelEncoder(label_id_info=self.predict_conf["DATA"]["label_encoder_ner"],
                                     isFile=True)
-        for label_id, label_name in sorted(self.label_encoder_cls.id_label_dict.items(), key=lambda x:x[0]):
+        logging.info("分类任务标签")
+        for label_id, label_name in sorted(self.label_encoder_cls.id_label_dict.items(), key=lambda x: x[0]):
             logging.info("%d: %s" % (label_id, label_name))
-        for label_id, label_name in sorted(self.label_encoder_ner.id_label_dict.items(), key=lambda x:x[0]):
+        logging.info("ner任务标签")
+        for label_id, label_name in sorted(self.label_encoder_ner.id_label_dict.items(), key=lambda x: x[0]):
             logging.info("%d: %s" % (label_id, label_name))
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"])
@@ -43,7 +45,6 @@ class Predict:
         """执行入口
         """
         if self.predict_conf["RUN"].getboolean("finetune_ernie"):
-            predict_conf = self.predict_conf["ERNIE"]
             pre_trainernie = ErnieModel.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"])
             model_predict = ErnieMTLMode(pre_trainernie,
                                          ner_num_classes=self.label_encoder_ner.size() * 2 - 1,
@@ -73,8 +74,8 @@ class Predict:
                                         predict_data=predict_data,
                                         label_encoder_ner=self.label_encoder_ner,
                                         label_encoder_cls=self.label_encoder_cls,
-                                        batch_size=predict_conf.getint("batch_size"),
-                                        max_seq_len=predict_conf.getint("max_seq_len"),
+                                        batch_size=self.predict_conf["ERNIE"].getint("batch_size"),
+                                        max_seq_len=self.predict_conf["ERNIE"].getint("max_seq_len"),
                                         max_ensure=True,
                                         with_label=False)
                     for origin_text, entity, pre_lname in zip(origin_texts, ner_pre_entity, cls_pre_lname):
@@ -92,8 +93,8 @@ class Predict:
                                     predict_data=predict_data,
                                     label_encoder_ner=self.label_encoder_ner,
                                     label_encoder_cls=self.label_encoder_cls,
-                                    batch_size=predict_conf.getint("batch_size"),
-                                    max_seq_len=predict_conf.getint("max_seq_len"),
+                                    batch_size=self.predict_conf["ERNIE"].getint("batch_size"),
+                                    max_seq_len=self.predict_conf["ERNIE"].getint("max_seq_len"),
                                     max_ensure=True,
                                     with_label=False)
                 for origin_text, entity, pre_lname in zip(origin_texts, ner_pre_entity, cls_pre_lname):

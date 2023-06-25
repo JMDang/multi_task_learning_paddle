@@ -13,7 +13,7 @@ import logging
 import configparser
 import numpy as np
 import paddle
-from paddlenlp.transformers import AutoTokenizer,ErnieModel
+from paddlenlp.transformers import AutoTokenizer, ErnieModel
 
 import dygraph
 from data_loader import DataLoader
@@ -39,8 +39,10 @@ class Train:
                                               isFile=True)
         self.label_encoder_ner = LabelEncoder(label_id_info=self.train_conf["DATA"]["label_encoder_ner"],
                                               isFile=True)
+        logging.info("分类任务标签")
         for label_id, label_name in sorted(self.label_encoder_cls.id_label_dict.items(), key=lambda x: x[0]):
             logging.info("%d: %s" % (label_id, label_name))
+        logging.info("ner任务标签")
         for label_id, label_name in sorted(self.label_encoder_ner.id_label_dict.items(), key=lambda x: x[0]):
             logging.info("%d: %s" % (label_id, label_name))
 
@@ -69,7 +71,8 @@ class Train:
 
         if self.train_conf["RUN"].getboolean("ernie_to_static"):
             self.ernie_to_static(train_conf=self.train_conf,
-                                 label_encoder=self.label_encoder,
+                                 label_encoder_ner=self.label_encoder_ner,
+                                 label_encoder_cls=self.label_encoder_cls
                                  )
             logging.info("[IMPORTANT]ernie model to static")
     
@@ -97,8 +100,8 @@ class Train:
         """
         pre_trainernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
         model = ErnieMTLMode(pre_trainernie,
-                                     ner_num_classes=label_encoder_ner.size() * 2 - 1,
-                                     cls_num_classes=label_encoder_cls.size())
+                             ner_num_classes=label_encoder_ner.size() * 2 - 1,
+                             cls_num_classes=label_encoder_cls.size())
         dygraph.load_model(model, train_conf["MODEL_FILE"]["model_best_path"])
 
         dygraph.train(model,
@@ -118,7 +121,8 @@ class Train:
     
     @staticmethod
     def ernie_to_static(train_conf,
-                        label_encoder):
+                        label_encoder_ner,
+                        label_encoder_cls):
         """ernie模型转静态图模型文件
         """
         pre_trainernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])

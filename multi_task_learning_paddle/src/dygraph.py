@@ -36,8 +36,7 @@ def train(model,
           max_ensure=True,
           model_save_path=None,
           best_model_save_path=None,
-          print_step=15,
-          use_crf=True
+          print_step=15
         ):
     """动态图训练
     """
@@ -163,17 +162,17 @@ def predict(model,
             ner_cur_pre_label = ner_prediction.numpy()
             ner_pre_label.extend(ner_cur_pre_label)
             ner_pre_entity.extend(helper.extract_entity_crf(pre_label=ner_cur_pre_label,
-                                                       predict_length=cur_predict_length.numpy(),
-                                                       label_encoder=label_encoder_ner))
+                                                            predict_length=cur_predict_length.numpy(),
+                                                            label_encoder=label_encoder_ner))
             ner_rea_label.extend(cur_rea_label_ner)
             ner_rea_entity.extend(cur_rea_entity)
 
             #cls
-            cls_cur_pre_label = np.argmax(paddle.nn.functional.softmax(cls_logits).numpy(), axis=1)
+            cls_cur_pre_label = np.argmax(paddle.nn.functional.softmax(cls_logits).numpy(), axis=-1)
             cls_pre_label.extend(cls_cur_pre_label)
-            cls_pre_lname.extend(label_encoder_cls.inverse_transform(label_id) for label_id in cls_cur_pre_label)
+            cls_pre_lname.extend([label_encoder_cls.inverse_transform(label_id) for label_id in cls_cur_pre_label])
             cls_rea_label.extend(cur_rea_label_cls)
-            cls_rea_lname.extend(label_encoder_cls.inverse_transform(label_id) for label_id in cur_rea_label_cls)
+            cls_rea_lname.extend([label_encoder_cls.inverse_transform(label_id) for label_id in cur_rea_label_cls])
 
         model.train()
         return [ner_pre_label, ner_pre_entity, ner_rea_label, ner_rea_entity,
@@ -193,12 +192,13 @@ def predict(model,
 
             ner_logits, ner_prediction, cls_logits = model(cur_predict_data, cur_predict_length)
             ner_cur_pre_label = ner_prediction.numpy()
-            cls_cur_pre_label = np.argmax(paddle.nn.functional.softmax(cls_logits).numpy(), axis=1)
+            cls_cur_pre_label = np.argmax(paddle.nn.functional.softmax(cls_logits).numpy(), axis=-1)
             ner_pre_label.extend(ner_cur_pre_label)
+            cls_pre_label.extend(cls_cur_pre_label)
             ner_pre_entity.extend(helper.extract_entity_crf(pre_label=ner_cur_pre_label,
                                                         predict_length=cur_predict_length.numpy(),
                                                         label_encoder=label_encoder_ner))
-            cls_pre_lname.extend(label_encoder_cls.inverse_transform(label_id) for label_id in cls_cur_pre_label)
+            cls_pre_lname.extend([label_encoder_cls.inverse_transform(label_id) for label_id in cls_cur_pre_label])
 
         model.train()
         return ner_pre_label, ner_pre_entity, cls_pre_label, cls_pre_lname
@@ -251,8 +251,8 @@ def eval(model,
 
     rea_label = np.array(cls_rea_label).flatten()
     pre_label = np.array(cls_pre_label).flatten()
-    cls_precision, cla_recall, cls_f1 = helper.multi_classify_prf_macro(rea_label, pre_label)
-    return ner_precision, ner_recall, ner_f1, cls_precision, cla_recall, cls_f1
+    cls_precision, cls_recall, cls_f1 = helper.multi_classify_prf_macro(rea_label, pre_label)
+    return ner_precision, ner_recall, ner_f1, cls_precision, cls_recall, cls_f1
 
 def load_model(model, model_path):
     """ 加载模型

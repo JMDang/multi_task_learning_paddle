@@ -25,7 +25,7 @@ logging.basicConfig(
     level=logging.INFO)
 
 class ErnieMTLModel(nn.Layer):
-    def __init__(self, ernie, ner_num_classes, cls_num_classes, crf_lr=0.1, dropout=0.5):
+    def __init__(self, ernie, ner_num_classes, cls_num_classes, dropout=None, crf_lr=0.1):
         super().__init__()
         self.ner_num_classes = ner_num_classes
         self.cls_num_classes = cls_num_classes
@@ -61,7 +61,7 @@ class ErnieMTLModel(nn.Layer):
 
 
 if __name__ == "__main__":
-    ernie = ErnieModel.from_pretrained("ernie-1.0", num_classes=3)
+    ernie = ErnieModel.from_pretrained("ernie-1.0")
     model = ErnieMTLModel(ernie, ner_num_classes=3, cls_num_classes=3,dropout=0.1)
     from paddlenlp.transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained('ernie-1.0')

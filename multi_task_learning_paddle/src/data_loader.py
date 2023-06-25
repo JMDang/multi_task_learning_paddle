@@ -37,14 +37,14 @@ class DataLoader:
                 self.train_entity_list, self.train_label_list_ner, self.train_label_list_cls = \
                 DataLoader.read_file(train_data_dir, self.tokenizer, self.label_encoder_ner, self.label_encoder_cls)
             logging.info(f"train data num = {len(self.train_text_ids_list)}")
-            self.train_data = list(zip(self.train_text_ids_list, self.train_text_ids_length, \
+            self.train_data = list(zip(self.train_text_ids_list, self.train_text_ids_length,
                                         self.train_label_list_ner, self.train_label_list_cls, self.train_entity_list))
         else:
             self.train_data = None
 
         if dev_data_dir:
             self.dev_text_list, self.dev_text_ids_list, self.dev_text_ids_length, \
-                self.dev_entity_list,self.dev_label_list_ner, self.dev_label_list_cls = \
+                self.dev_entity_list, self.dev_label_list_ner, self.dev_label_list_cls = \
                 DataLoader.read_file(dev_data_dir, self.tokenizer, self.label_encoder_ner, self.label_encoder_cls)
             logging.info("dev data num = {}".format(len(self.dev_text_ids_list)))
             self.dev_data = list(zip(self.dev_text_ids_list, self.dev_text_ids_length, \
@@ -105,15 +105,17 @@ class DataLoader:
                     class416----->416----------->B_class416:831, I_class3:832
                     
                     """
-                    label = [0] * text_len
+                    label_ner = [0] * text_len
                     for item in label_entity_list:
                         start, end = item[:2]
                         if (end - 1) == start:
-                            label[start+1] = label_encoder.transform(item[2]) * 2 - 1
+                            label_ner[start+1] = label_encoder_ner.transform(item[2]) * 2 - 1
                         else:
-                            label[start + 1] = label_encoder.transform(item[2]) * 2 - 1
-                            label[end] = label_encoder.transform(item[2]) * 2
-                            label[start + 2: end] = [label_encoder.transform(item[2]) * 2] * (end - start - 2)
+                            label_ner[start + 1] = label_encoder_ner.transform(item[2]) * 2 - 1
+                            label_ner[end] = label_encoder_ner.transform(item[2]) * 2
+                            label_ner[start + 2: end] = [label_encoder_ner.transform(item[2]) * 2] * (end - start - 2)
+                    label_list_ner.append(label_ner)
+                    label_list_cls.append(label_encoder_cls.transform(label_cls))
 
         logging.info("tokenizer encode start")
         start_time = time.time()
@@ -173,7 +175,7 @@ class DataLoader:
             cur_max_len = max([len(x) for x in data_list])
             cur_max_len = max_seq_len if cur_max_len > max_seq_len else cur_max_len
 
-        def _process_one_sentence(x, cur_max_len):
+        def _process_one_sen(x, cur_max_len):
             """
             保证按照最大长度截取，ids的最后一位是ernie的sentence segid
             """
@@ -182,7 +184,7 @@ class DataLoader:
             return x
 
         if is_ids:
-            res = [np.pad(_process_one_sentence(x, cur_max_len), [0, cur_max_len - len(x[:cur_max_len])], mode="constant") for x in data_list]
+            res = [np.pad(_process_one_sen(x, cur_max_len), [0, cur_max_len - len(x[:cur_max_len])], mode="constant") for x in data_list]
         else:
             res = [np.pad(x[:cur_max_len], [0, cur_max_len - len(x[:cur_max_len])], mode='constant') for x in data_list]
         return np.array(res)
@@ -200,7 +202,7 @@ class DataLoader:
         data_lists = list(zip(*cur_batch_data))
 
         ids_list = data_lists[0]
-        length_list = [num if num < max_seq_len else max_ensure for num in data_lists[1]]
+        length_list = [num if num <= max_seq_len else max_seq_len for num in data_lists[1]]
         ids_array = DataLoader.batch_padding(ids_list, max_seq_len, max_ensure, is_ids=True)
         batch_list.append(ids_array)
         batch_list.append(np.array(length_list))
