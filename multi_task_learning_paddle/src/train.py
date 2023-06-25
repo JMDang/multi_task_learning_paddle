@@ -53,8 +53,7 @@ class Train:
         """
         self.data_set = DataLoader(tokenizer=self.tokenizer,
                                    label_encoder_ner=self.label_encoder_ner,
-                                   label_encoder_cls=self.label_encoder_cls
-                                   )
+                                   label_encoder_cls=self.label_encoder_cls)
         self.data_set.gen_data(
             train_data_dir=self.train_conf["DATA"]["train_data_path"],
             dev_data_dir=self.train_conf["DATA"]["dev_data_path"] if \
@@ -72,8 +71,7 @@ class Train:
         if self.train_conf["RUN"].getboolean("ernie_to_static"):
             self.ernie_to_static(train_conf=self.train_conf,
                                  label_encoder_ner=self.label_encoder_ner,
-                                 label_encoder_cls=self.label_encoder_cls
-                                 )
+                                 label_encoder_cls=self.label_encoder_cls)
             logging.info("[IMPORTANT]ernie model to static")
     
     @staticmethod
@@ -94,12 +92,11 @@ class Train:
     def finetune_ernie(train_conf,
                        data_set,
                        label_encoder_ner,
-                       label_encoder_cls
-                       ):
+                       label_encoder_cls):
         """ernie微调
         """
-        pre_trainernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
-        model = ErnieMTLMode(pre_trainernie,
+        pretrain_ernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
+        model = ErnieMTLMode(pretrain_ernie,
                              ner_num_classes=label_encoder_ner.size() * 2 - 1,
                              cls_num_classes=label_encoder_cls.size())
         dygraph.load_model(model, train_conf["MODEL_FILE"]["model_best_path"])
@@ -125,8 +122,8 @@ class Train:
                         label_encoder_cls):
         """ernie模型转静态图模型文件
         """
-        pre_trainernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
-        model = ErnieMTLMode(pre_trainernie,
+        pretrain_ernie = ErnieModel.from_pretrained(train_conf["ERNIE"]["pretrain_model"])
+        model = ErnieMTLMode(pretrain_ernie,
                              ner_num_classes=label_encoder_ner.size() * 2 - 1,
                              cls_num_classes=label_encoder_cls.size())
         dygraph.load_model(model, train_conf["MODEL_FILE"]["model_best_path"])

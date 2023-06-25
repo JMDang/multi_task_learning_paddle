@@ -70,7 +70,6 @@ def train(model,
             cur_train_label_ner = paddle.to_tensor(cur_train_label_ner)
             cur_train_label_cls = paddle.to_tensor(cur_train_label_cls)
             # 生成loss
-
             ner_logits, ner_prediction, cls_logits = model(cur_train_data, cur_train_length)
             crf_loss = paddle.mean(model.crf_loss(ner_logits, cur_train_length, cur_train_label_ner))
             cls_loss = criterion(cls_logits, cur_train_label_cls)

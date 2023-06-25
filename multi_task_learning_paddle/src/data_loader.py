@@ -184,7 +184,7 @@ class DataLoader:
             return x
 
         if is_ids:
-            res = [np.pad(_process_one_sen(x, cur_max_len), [0, cur_max_len - len(x[:cur_max_len])], mode="constant") for x in data_list]
+            res = [np.pad (_process_one_sen(x, cur_max_len), [0, cur_max_len - len(x[:cur_max_len])], mode="constant") for x in data_list]
         else:
             res = [np.pad(x[:cur_max_len], [0, cur_max_len - len(x[:cur_max_len])], mode='constant') for x in data_list]
         return np.array(res)

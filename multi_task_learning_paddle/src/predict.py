@@ -45,8 +45,8 @@ class Predict:
         """执行入口
         """
         if self.predict_conf["RUN"].getboolean("finetune_ernie"):
-            pre_trainernie = ErnieModel.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"])
-            model_predict = ErnieMTLMode(pre_trainernie,
+            pretrain_ernie = ErnieModel.from_pretrained(self.predict_conf["ERNIE"]["pretrain_model"])
+            model_predict = ErnieMTLMode(pretrain_ernie,
                                          ner_num_classes=self.label_encoder_ner.size() * 2 - 1,
                                          cls_num_classes=self.label_encoder_cls.size())
             dygraph.load_model(model_predict, self.predict_conf["MODEL_FILE"]["model_best_path"])
